@@ -70,9 +70,9 @@ public class IsapiEmployeeUserSyncService {
         LocalDate beginDate = employee.getHireDate() != null ? employee.getHireDate() : LocalDate.now();
         LocalDateTime beginTime = beginDate.atStartOfDay();
         LocalDateTime endTime = beginTime.plusYears(10).minusSeconds(1);
-        String fullName = ((employee.getFirstName() != null ? employee.getFirstName() : "")
-                + " "
-                + (employee.getLastName() != null ? employee.getLastName() : "")).trim();
+        String fullName = String.format("%s %s",
+                employee.getFirstName() != null ? employee.getFirstName() : "",
+                employee.getLastName() != null ? employee.getLastName() : "").trim();
         return new DeviceUserCreateRequest(
                 employee.getEmployeeId(),
                 fullName,
