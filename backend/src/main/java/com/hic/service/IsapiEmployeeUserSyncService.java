@@ -1,6 +1,5 @@
 package com.hic.service;
 
-import com.hic.dto.IsapiUserInfoCreateRequestDTO;
 import com.hic.exception.DeviceSyncException;
 import com.hic.exception.UpstreamApiException;
 import com.hic.model.Employee;
@@ -18,7 +17,6 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriComponentsBuilder;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
@@ -32,30 +30,15 @@ import java.util.List;
 @RequiredArgsConstructor
 public class IsapiEmployeeUserSyncService {
 
-    private static final String DEFAULT_DEVICE_BASE_URL = "http://192.168.0.200";
+    private static final String DEFAULT_ISAPI_BASE_URL = "http://localhost:8081";
 
     private final RestTemplate restTemplate;
 
-    @Value("${isapi.user-info-record.base-url:" + DEFAULT_DEVICE_BASE_URL + "}")
-    private String userInfoRecordBaseUrl;
+    @Value("${isapi.base-url:" + DEFAULT_ISAPI_BASE_URL + "}")
+    private String isapiBaseUrl;
 
-    @Value("${isapi.user-info-record.path:/ISAPI/AccessControl/UserInfo/Record}")
-    private String userInfoRecordPath;
-
-    @Value("${isapi.user-info-record.security:1}")
-    private String security;
-
-    @Value("${isapi.user-info-record.iv:}")
-    private String iv;
-
-    @Value("${isapi.user-info-record.door-right:1}")
-    private String doorRight;
-
-    @Value("${isapi.user-info-record.door-no:1}")
-    private int doorNo;
-
-    @Value("${isapi.user-info-record.plan-template-no:1}")
-    private String planTemplateNo;
+    @Value("${isapi.device-user.default-device-id:1}")
+    private Long defaultDeviceId;
 
     @Value("${isapi.user-info-record.username:}")
     private String username;
@@ -64,13 +47,13 @@ public class IsapiEmployeeUserSyncService {
     private String password;
 
     public void syncEmployee(Employee employee) {
-        IsapiUserInfoCreateRequestDTO request = buildRequest(employee);
+        DeviceUserCreateRequest request = buildRequest(employee);
         HttpHeaders headers = buildHeaders();
-        String url = buildUserInfoRecordUrl();
+        String url = buildDeviceUserUrl();
         log.info("Syncing employee {} to ISAPI device endpoint {}", employee.getEmployeeId(), url);
 
         try {
-            HttpEntity<IsapiUserInfoCreateRequestDTO> entity = new HttpEntity<>(request, headers);
+            HttpEntity<DeviceUserCreateRequest> entity = new HttpEntity<>(request, headers);
             ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
             if (!response.getStatusCode().is2xxSuccessful()) {
                 throw buildUpstreamApiException(url, response.getStatusCode(), response.getBody());
@@ -83,42 +66,26 @@ public class IsapiEmployeeUserSyncService {
         }
     }
 
-    private IsapiUserInfoCreateRequestDTO buildRequest(Employee employee) {
+    private DeviceUserCreateRequest buildRequest(Employee employee) {
         LocalDate beginDate = employee.getHireDate() != null ? employee.getHireDate() : LocalDate.now();
         LocalDateTime beginTime = beginDate.atStartOfDay();
         LocalDateTime endTime = beginTime.plusYears(10).minusSeconds(1);
-        String fullName = (employee.getFirstName() + " " + employee.getLastName()).trim();
-        IsapiUserInfoCreateRequestDTO.ValidityDTO validity = new IsapiUserInfoCreateRequestDTO.ValidityDTO(
-                true,
-                beginTime.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME),
-                endTime.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME),
-                "local"
-        );
-        IsapiUserInfoCreateRequestDTO.RightPlanDTO rightPlan = new IsapiUserInfoCreateRequestDTO.RightPlanDTO(doorNo, planTemplateNo);
-        IsapiUserInfoCreateRequestDTO.UserInfoDTO userInfo = new IsapiUserInfoCreateRequestDTO.UserInfoDTO(
+        String fullName = String.format("%s %s",
+                employee.getFirstName() != null ? employee.getFirstName() : "",
+                employee.getLastName() != null ? employee.getLastName() : "").trim();
+        return new DeviceUserCreateRequest(
                 employee.getEmployeeId(),
                 fullName,
                 "normal",
-                employee.getGender() == null ? "" : employee.getGender(),
-                false,
-                0,
-                validity,
-                doorRight,
-                List.of(rightPlan),
-                ""
+                employee.getGender(),
+                beginTime.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME),
+                endTime.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME),
+                null
         );
-        return new IsapiUserInfoCreateRequestDTO(userInfo);
     }
 
-    private String buildUserInfoRecordUrl() {
-        UriComponentsBuilder builder = UriComponentsBuilder
-                .fromHttpUrl(trimTrailingSlash(resolveUserInfoRecordBaseUrl()) + ensureLeadingSlash(userInfoRecordPath))
-                .queryParam("format", "json")
-                .queryParam("security", security);
-        if (StringUtils.hasText(iv)) {
-            builder.queryParam("iv", iv);
-        }
-        return builder.toUriString();
+    private String buildDeviceUserUrl() {
+        return trimTrailingSlash(resolveIsapiBaseUrl()) + "/api/devices/" + defaultDeviceId + "/users";
     }
 
     private HttpHeaders buildHeaders() {
@@ -140,12 +107,8 @@ public class IsapiEmployeeUserSyncService {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }
 
-    private String ensureLeadingSlash(String value) {
-        return value.startsWith("/") ? value : "/" + value;
-    }
-
-    private String resolveUserInfoRecordBaseUrl() {
-        return StringUtils.hasText(userInfoRecordBaseUrl) ? userInfoRecordBaseUrl : DEFAULT_DEVICE_BASE_URL;
+    private String resolveIsapiBaseUrl() {
+        return StringUtils.hasText(isapiBaseUrl) ? isapiBaseUrl : DEFAULT_ISAPI_BASE_URL;
     }
 
     private UpstreamApiException buildUpstreamApiException(String url, HttpStatusCode statusCode, String responseBody) {
@@ -154,12 +117,23 @@ public class IsapiEmployeeUserSyncService {
                 .append(" for ")
                 .append(url);
         if (statusCode.value() == 404) {
-            message.append(". Verify isapi.user-info-record.base-url points to the device host and not the backend host.");
+            message.append(". Verify isapi.base-url points to the ISAPI service and isapi.device-user.default-device-id exists.");
         }
         if (StringUtils.hasText(responseBody)) {
             message.append(" Response: ").append(responseBody);
         }
         log.warn("{}", message);
         return new UpstreamApiException(statusCode, message.toString());
+    }
+
+    private record DeviceUserCreateRequest(
+            String employeeNo,
+            String name,
+            String userType,
+            String gender,
+            String beginTime,
+            String endTime,
+            String faceDataUrl
+    ) {
     }
 }
