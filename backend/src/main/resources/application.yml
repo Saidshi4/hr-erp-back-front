@@ -48,13 +48,8 @@ logging:
 
 isapi:
   base-url: http://192.168.0.198:8081
+  device-user:
+    default-device-id: ${ISAPI_DEVICE_USER_DEFAULT_DEVICE_ID:1}
   user-info-record:
-    base-url: ${ISAPI_USER_INFO_BASE_URL:http://192.168.0.200}
-    path: /ISAPI/AccessControl/UserInfo/Record
-    security: ${ISAPI_USER_INFO_SECURITY:1}
-    iv: ${ISAPI_USER_INFO_IV:}
     username: ${ISAPI_USER_INFO_USERNAME:}
     password: ${ISAPI_USER_INFO_PASSWORD:}
-    door-right: ${ISAPI_USER_INFO_DOOR_RIGHT:1}
-    door-no: ${ISAPI_USER_INFO_DOOR_NO:1}
-    plan-template-no: ${ISAPI_USER_INFO_PLAN_TEMPLATE_NO:1}
