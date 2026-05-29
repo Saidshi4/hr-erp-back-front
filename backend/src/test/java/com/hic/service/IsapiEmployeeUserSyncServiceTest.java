@@ -128,6 +128,7 @@ class IsapiEmployeeUserSyncServiceTest {
 
     @Test
     void syncEmployee_http404IncludesTargetUrlAndHostHint() {
+        ReflectionTestUtils.setField(service, "isapiBaseUrl", "");
         server.expect(requestTo("http://192.168.0.200/ISAPI/AccessControl/UserInfo/Record?format=json&security=1&iv=iv-token"))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND)

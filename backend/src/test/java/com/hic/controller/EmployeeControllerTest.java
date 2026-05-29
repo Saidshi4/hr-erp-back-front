@@ -64,7 +64,7 @@ class EmployeeControllerTest {
     void getAll_returnsPaginatedResponse() throws Exception {
         EmployeeResponseDTO dto = buildResponseDTO();
         PaginatedResponse<EmployeeResponseDTO> page = PaginatedResponse.of(List.of(dto), 1L, 1, 0, 20);
-        when(employeeService.getAll(0, 20, null)).thenReturn(page);
+        when(employeeService.getAll(0, 20, null, null)).thenReturn(page);
 
         mockMvc.perform(get("/api/employees?page=0&size=20"))
                 .andExpect(status().isOk())
@@ -98,6 +98,7 @@ class EmployeeControllerTest {
         dto.setFirstName("Jane");
         dto.setLastName("Smith");
         dto.setDepartmentId(1L);
+        dto.setTimetableId(1L);
 
         EmployeeResponseDTO response = buildResponseDTO();
         response.setFirstName("Jane");
@@ -138,6 +139,7 @@ class EmployeeControllerTest {
         dto.setFirstName("Updated");
         dto.setLastName("Name");
         dto.setDepartmentId(1L);
+        dto.setTimetableId(1L);
 
         EmployeeResponseDTO response = buildResponseDTO();
         response.setFirstName("Updated");

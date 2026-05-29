@@ -2,6 +2,7 @@ package com.hic.controller;
 
 import com.hic.repository.UserRepository;
 import com.hic.service.DeviceUserIsapiProxyService;
+import com.hic.service.EmployeeFaceImageService;
 import com.hic.util.JwtUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
@@ -34,6 +35,9 @@ class DeviceUserControllerTest {
 
     @MockBean
     private DeviceUserIsapiProxyService deviceUserIsapiProxyService;
+
+    @MockBean
+    private EmployeeFaceImageService employeeFaceImageService;
 
     @MockBean
     private JwtUtil jwtUtil;
