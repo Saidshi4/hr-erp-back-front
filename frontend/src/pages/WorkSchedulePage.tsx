@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
 import Layout from '../components/Layout.tsx'
 import { useScheduleStore } from '../store/scheduleStore.ts'
-import { Timetable, Holiday, Permission, PermissionType } from '../types'
+import { Timetable, Holiday, Permission, PermissionType, Branch, Department, Employee } from '../types'
 import ShiftAssignmentPage from './ShiftAssignmentPage.tsx'
 import PermissionAssignmentPage from './PermissionAssignmentPage.tsx'
+import { branchApi } from '../api/branchApi.ts'
+import { departmentApi } from '../api/departmentApi.ts'
+import { employeeApi } from '../api/employeeApi.ts'
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 const SHIFT_TYPES = ['MORNING', 'STANDARD', 'NIGHT', 'FLEXIBLE']
@@ -266,19 +269,41 @@ const defaultHoliday = (): Partial<Holiday> => ({
   scopeType: '',
 })
 
-function HolidayModal({ initial, onSave, onClose }: {
+function HolidayModal({ initial, departments, branches, onSave, onClose }: {
   initial?: Partial<Holiday>
+  departments: Department[]
+  branches: Branch[]
   onSave: (data: Partial<Holiday>) => Promise<void>
   onClose: () => void
 }) {
-  const [form, setForm] = useState<Partial<Holiday>>(initial ?? defaultHoliday())
+  const knownHolidayNames = DEFAULT_HOLIDAY_NAMES.filter(name => name !== 'Custom')
+  const initialUsesCustomName = !!initial?.name && !knownHolidayNames.includes(initial.name)
+  const [form, setForm] = useState<Partial<Holiday>>(
+    initial ? { ...initial, name: initialUsesCustomName ? 'Custom' : initial.name } : defaultHoliday(),
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [customName, setCustomName] = useState('')
+  const [customName, setCustomName] = useState(initialUsesCustomName ? initial?.name ?? '' : '')
 
   const set = (k: keyof Holiday, v: unknown) => setForm(f => ({ ...f, [k]: v }))
 
-  const displayName = form.name === 'Custom' ? customName : form.name
+  const displayName = form.name === 'Custom' ? customName.trim() : form.name
+  const targetOptions = form.applyScope === 'SPECIFIC_DEPARTMENT'
+    ? departments.map(department => ({ id: department.id, name: department.departmentName }))
+    : form.applyScope === 'SPECIFIC_BRANCH'
+      ? branches.map(branch => ({ id: branch.id, name: branch.branchName }))
+      : []
+  const scopeType = form.applyScope === 'SPECIFIC_DEPARTMENT'
+    ? 'DEPARTMENT'
+    : form.applyScope === 'SPECIFIC_BRANCH'
+      ? 'BRANCH'
+      : ''
+
+  const toggleTarget = (targetId: number, checked: boolean) => {
+    set('targetIds', checked
+      ? [...(form.targetIds ?? []), targetId]
+      : (form.targetIds ?? []).filter(id => id !== targetId))
+  }
 
   const handleSave = async () => {
     if (!displayName) { setError('Ad seçilməlidir'); return }
@@ -288,7 +313,12 @@ function HolidayModal({ initial, onSave, onClose }: {
     }
     setSaving(true)
     try {
-      await onSave({ ...form, name: displayName as string })
+      await onSave({
+        ...form,
+        name: displayName as string,
+        scopeType,
+        targetIds: scopeType ? (form.targetIds ?? []) : [],
+      })
       onClose()
     } catch { setError('Xəta baş verdi') }
     finally { setSaving(false) }
@@ -319,6 +349,27 @@ function HolidayModal({ initial, onSave, onClose }: {
               {APPLY_SCOPES.map(s => <option key={s} value={s}>{APPLY_SCOPE_LABELS[s]}</option>)}
             </select>
           </div>
+          {(form.applyScope === 'SPECIFIC_DEPARTMENT' || form.applyScope === 'SPECIFIC_BRANCH') && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Hədəf seçimi</label>
+              {targetOptions.length === 0 ? (
+                <p className="text-xs text-gray-500 border rounded-lg px-3 py-2">Mövcud seçim yoxdur</p>
+              ) : (
+                <div className="max-h-40 overflow-y-auto border rounded-lg p-2 space-y-1">
+                  {targetOptions.map(option => (
+                    <label key={option.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={(form.targetIds ?? []).includes(option.id)}
+                        onChange={e => toggleTarget(option.id, e.target.checked)}
+                      />
+                      <span>{option.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Açıqlama</label>
             <textarea value={form.description ?? ''} onChange={e => set('description', e.target.value)} rows={2} className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
@@ -340,8 +391,26 @@ function HolidayTab() {
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Holiday | null>(null)
   const [confirmId, setConfirmId] = useState<number | null>(null)
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
 
-  useEffect(() => { void fetchHolidays() }, [])
+  useEffect(() => {
+    const loadScopeData = async () => {
+      try {
+        const [departmentRes, branchRes] = await Promise.all([
+          departmentApi.getAll(),
+          branchApi.getAll(),
+        ])
+        setDepartments(departmentRes.data?.data ?? [])
+        setBranches(branchRes.data?.data ?? [])
+      } catch {
+        setDepartments([])
+        setBranches([])
+      }
+    }
+    void fetchHolidays()
+    void loadScopeData()
+  }, [])
 
   const handleSave = async (data: Partial<Holiday>) => {
     if (editing) await updateHoliday(editing.id, data)
@@ -396,6 +465,8 @@ function HolidayTab() {
       {showModal && (
         <HolidayModal
           initial={editing ?? undefined}
+          departments={departments}
+          branches={branches}
           onSave={handleSave}
           onClose={() => { setShowModal(false); setEditing(null) }}
         />
@@ -436,9 +507,12 @@ const STATUS_COLORS: Record<string, string> = {
   REJECTED: 'bg-red-100 text-red-600',
 }
 
-function PermissionModal({ initial, permissionTypes, onSave, onClose }: {
+function PermissionModal({ initial, permissionTypes, employees, departments, branches, onSave, onClose }: {
   initial?: Partial<Permission>
   permissionTypes: PermissionType[]
+  employees: Employee[]
+  departments: Department[]
+  branches: Branch[]
   onSave: (data: Partial<Permission>) => Promise<void>
   onClose: () => void
 }) {
@@ -446,16 +520,30 @@ function PermissionModal({ initial, permissionTypes, onSave, onClose }: {
   const [form, setForm] = useState<Partial<Permission>>(initial ?? defaultPermission())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const nameOptions = Array.from(new Set(types.map(type => type.name)))
+  const initialUsesCustomName = !!form.name && !nameOptions.includes(form.name)
+  const [nameSelection, setNameSelection] = useState(initialUsesCustomName ? 'Custom' : (form.name || nameOptions[0] || ''))
+  const [customName, setCustomName] = useState(initialUsesCustomName ? form.name ?? '' : '')
 
   const set = (k: keyof Permission, v: unknown) => setForm(f => ({ ...f, [k]: v }))
+  const targetOptions = form.applyType === 'EMPLOYEE'
+    ? employees.map(employee => ({ id: employee.id, name: `${employee.employeeId} — ${employee.firstName} ${employee.lastName}` }))
+    : form.applyType === 'DEPARTMENT'
+      ? departments.map(department => ({ id: department.id, name: department.departmentName }))
+      : form.applyType === 'BRANCH'
+        ? branches.map(branch => ({ id: branch.id, name: branch.branchName }))
+        : []
+  const requiresTarget = form.applyType === 'EMPLOYEE' || form.applyType === 'DEPARTMENT' || form.applyType === 'BRANCH'
 
   const handleSave = async () => {
-    if (!form.name?.trim()) { setError('Ad daxil edilməlidir'); return }
+    const selectedName = nameSelection === 'Custom' ? customName.trim() : nameSelection
+    if (!selectedName) { setError('Ad daxil edilməlidir'); return }
     if (!form.leaveType) { setError('İcazə növü seçilməlidir'); return }
     if (!form.startDate || !form.endDate) { setError('Tarix aralığı seçilməlidir'); return }
     if (form.endDate < form.startDate) { setError('Bitmə tarixi başlanğıc tarixindən əvvəl ola bilməz'); return }
+    if (requiresTarget && !form.targetId) { setError('Tətbiq hədəfi seçilməlidir'); return }
     setSaving(true)
-    try { await onSave(form); onClose() }
+    try { await onSave({ ...form, name: selectedName, targetId: requiresTarget ? form.targetId : undefined }); onClose() }
     catch { setError('Xəta baş verdi') }
     finally { setSaving(false) }
   }
@@ -468,7 +556,27 @@ function PermissionModal({ initial, permissionTypes, onSave, onClose }: {
         <div className="space-y-3">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Ad</label>
-            <input value={form.name ?? ''} onChange={e => set('name', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="İcazə adı" />
+            <select
+              value={nameSelection}
+              onChange={e => {
+                setNameSelection(e.target.value)
+                if (e.target.value !== 'Custom') {
+                  set('name', e.target.value)
+                }
+              }}
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              {nameOptions.map(option => <option key={option} value={option}>{option}</option>)}
+              <option value="Custom">Xüsusi ad</option>
+            </select>
+            {nameSelection === 'Custom' && (
+              <input
+                value={customName}
+                onChange={e => setCustomName(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm mt-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                placeholder="İcazə adı"
+              />
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">İcazə növü</label>
@@ -478,10 +586,32 @@ function PermissionModal({ initial, permissionTypes, onSave, onClose }: {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Tətbiq növü</label>
-            <select value={form.applyType} onChange={e => set('applyType', e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+            <select
+              value={form.applyType}
+              onChange={e => {
+                set('applyType', e.target.value)
+                set('targetId', undefined)
+              }}
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
               {APPLY_TYPES.map(a => <option key={a} value={a}>{APPLY_TYPE_LABELS[a]}</option>)}
             </select>
           </div>
+          {requiresTarget && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Hədəf</label>
+              <select
+                value={form.targetId ?? ''}
+                onChange={e => set('targetId', e.target.value ? Number(e.target.value) : undefined)}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+              >
+                <option value="">Seçin</option>
+                {targetOptions.map(option => (
+                  <option key={option.id} value={option.id}>{option.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Başlanğıc tarixi</label>
@@ -519,11 +649,31 @@ function PermissionTab() {
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Permission | null>(null)
   const [confirmId, setConfirmId] = useState<number | null>(null)
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
   const types = permissionTypes.length > 0 ? permissionTypes : DEFAULT_PERMISSION_TYPES
 
   useEffect(() => {
+    const loadTargetData = async () => {
+      try {
+        const [employeeRes, departmentRes, branchRes] = await Promise.all([
+          employeeApi.getAll(0, 500),
+          departmentApi.getAll(),
+          branchApi.getAll(),
+        ])
+        setEmployees(employeeRes.data?.content ?? [])
+        setDepartments(departmentRes.data?.data ?? [])
+        setBranches(branchRes.data?.data ?? [])
+      } catch {
+        setEmployees([])
+        setDepartments([])
+        setBranches([])
+      }
+    }
     void fetchPermissions()
     void fetchPermissionTypes()
+    void loadTargetData()
   }, [])
 
   const handleSave = async (data: Partial<Permission>) => {
@@ -591,6 +741,9 @@ function PermissionTab() {
         <PermissionModal
           initial={editing ?? undefined}
           permissionTypes={types}
+          employees={employees}
+          departments={departments}
+          branches={branches}
           onSave={handleSave}
           onClose={() => { setShowModal(false); setEditing(null) }}
         />
